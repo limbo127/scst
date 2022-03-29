@@ -2288,6 +2288,22 @@ static inline void scsi_done(struct scsi_cmnd *cmd)
 
 /* <scsi/scsi_request.h> */
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
+/*
+ * See also commit 6aded12b10e0 ("scsi: core: Remove struct scsi_request") # v5.18
+ */
+static inline struct scsi_cmnd *scsi_req(struct request *rq)
+{
+	return blk_mq_rq_to_pdu(rq);
+}
+
+#define SREQ_SENSE(req) ((req)->sense_buffer)
+#define SREQ_CP(req)    ((req)->cmnd)
+#else
+#define SREQ_SENSE(req) ((req)->sense)
+#define SREQ_CP(req)    ((req)->cmd)
+#endif
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
 static inline struct request *scsi_req(struct request *rq)
 {
@@ -2310,6 +2326,34 @@ static inline void scsi_req_init(struct request *rq)
 	rq->cmd = rq->__cmd;
 #else
 	return blk_rq_set_block_pc(rq);
+#endif
+}
+#endif
+
+/* <linux/bsg-lib.h> */
+
+/*
+ * Note: the function bsg_job_sense() exists only in SCST but not in any
+ * upstream kernel.
+ */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) &&	\
+     !defined(CONFIG_SUSE_KERNEL)) ||			\
+    (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0) &&	\
+     defined(CONFIG_SUSE_KERNEL))
+static inline void *bsg_job_sense(struct fc_bsg_job *job)
+{
+	return job->req->sense;
+}
+#else
+static inline void *bsg_job_sense(struct bsg_job *job)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
+	return job->req->sense;
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0) &&	\
+	!defined(CONFIG_SUSE_KERNEL)
+	return scsi_req(job->req)->sense;
+#else
+	return SREQ_SENSE(scsi_req(blk_mq_rq_from_pdu(job)));
 #endif
 }
 #endif
