@@ -6906,6 +6906,14 @@ enum scst_exec_res scst_cmp_wr_local(struct scst_cmd *cmd)
 		goto out_done;
 	}
 
+	if (cmd->bufflen != scst_cmd_get_expected_transfer_len_data(cmd)) {
+		PRINT_ERROR("COMPARE AND WRITE: data buffer length mismatch (CDB %u <> ini %u)",
+			    cmd->bufflen,
+			    scst_cmd_get_expected_transfer_len_data(cmd));
+		scst_set_invalid_field_in_cdb(cmd, 13/*NLB*/, 0);
+		goto out_done;
+	}
+
 	/* ToDo: HWALIGN'ed kmem_cache */
 	cwrp = kzalloc(sizeof(*cwrp), GFP_KERNEL);
 	if (cwrp == NULL) {
@@ -6916,14 +6924,6 @@ enum scst_exec_res scst_cmp_wr_local(struct scst_cmd *cmd)
 
 	cwrp->cwr_orig_cmd = cmd;
 	cwrp->cwr_finish_fn = scst_cwr_read_cmd_finished;
-
-	if (cmd->bufflen != scst_cmd_get_expected_transfer_len_data(cmd)) {
-		PRINT_ERROR("COMPARE AND WRITE: data buffer length mismatch (CDB %u <> ini %u)",
-			    cmd->bufflen,
-			    scst_cmd_get_expected_transfer_len_data(cmd));
-		scst_set_invalid_field_in_cdb(cmd, 13/*NLB*/, 0);
-		goto out_done;
-	}
 
 	/*
 	 * As required by SBC, DIF PI, if any, is not checked for the read part
@@ -8073,8 +8073,7 @@ scst_alloc_passthrough_request(struct request_queue *q, int rw, gfp_t gfp_mask)
 	return blk_get_request(q, rw == READ ? REQ_OP_SCSI_IN : REQ_OP_SCSI_OUT,
 			       scst_gfp_mask_to_flags(gfp_mask));
 #else
-	return blk_mq_alloc_request(q, rw == READ ? REQ_OP_DRV_IN :
-				    rw == READ ? REQ_OP_DRV_IN : REQ_OP_DRV_OUT,
+	return blk_mq_alloc_request(q, rw == READ ? REQ_OP_DRV_IN : REQ_OP_DRV_OUT,
 				    scst_gfp_mask_to_flags(gfp_mask));
 #endif
 }
@@ -8627,11 +8626,13 @@ int scst_scsi_exec_async(struct scst_cmd *cmd, void *data,
 #else
 	rq->retries = cmd->retries;
 #endif
+	rq->end_io      = scsi_end_async;
 	rq->end_io_data = sioc;
+
 	rq->cmd_flags |= REQ_FAILFAST_MASK;
 
 	blk_execute_rq_nowait(rq,
-		(cmd->queue_type == SCST_CMD_QUEUE_HEAD_OF_QUEUE), scsi_end_async);
+		(cmd->queue_type == SCST_CMD_QUEUE_HEAD_OF_QUEUE));
 out:
 	return res;
 
